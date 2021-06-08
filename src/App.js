@@ -36,18 +36,28 @@ class App extends React.Component {
     this.state = {
       script: ["CheckHeightVerify(10)", "CheckHeightVerify(11)"],
       inputStack: "",
-      stack: "",
+      stack: [],
       output: "Out here",
       hexScript: "",
       executingStep: -1,
+      result: [],
+      blockHeight: "20",
+      prevBlockHash: "",
+      commitment: "",
     };
     this.scriptUpdate = this.scriptUpdate.bind(this);
     this.inputStackUpdate = this.inputStackUpdate.bind(this);
-    this.stackUpdate = this.stackUpdate.bind(this);
+    this.blockHeightChange = this.blockHeightChange.bind(this);
     this.onRun = this.onRun.bind(this);
+    this.onStep = this.onStep.bind(this);
     this.onStop = this.onStop.bind(this);
   }
 
+  blockHeightChange(event) {
+    this.setState({
+      blockHeight: event.target.value,
+    });
+  }
   scriptUpdate(event) {
     this.setState({
       script: event.target.value.split(/\n/),
@@ -60,17 +70,37 @@ class App extends React.Component {
     });
   }
 
-  stackUpdate(event) {
+  async onStop() {
     this.setState({
-      stack: event.target.value,
+      executingStep: -1,
+      stepResult: "Stopped",
+      stack: [],
     });
   }
 
-  async onStop(e) {
-    e.preventDefault();
+  onStep() {
+    const newStep = this.state.executingStep + 1;
+    console.log("stepping to: ", newStep);
+    if (newStep >= this.state.result.length) {
+      this.onStop();
+      return;
+    }
+    console.log(this.state.result);
+    const result = this.state.result[newStep];
+    const newStack =
+      result?.step_result.ExecutedSuccessfully.stack_after_executing;
+    console.log("new stack", newStack);
     this.setState({
-      executingStep: -1,
+      executingStep: newStep,
+      output:
+        `${result.op_code}: \n` +
+        (result.step_result.Failed
+          ? `Error: ${this.state.result[newStep].step_result.Failed?.error}\n`
+          : `Succeeded`),
     });
+    if (newStack) {
+      this.setState({ stack: newStack });
+    }
   }
 
   async onRun(e) {
@@ -78,7 +108,7 @@ class App extends React.Component {
     console.log("Running");
     console.log(this.state);
 
-    this.setState({ stack: this.state.inputStack });
+    // this.setState({ stack: this.state.inputStack });
     try {
       const hexScript = parseToHex(this.state.script);
 
@@ -86,18 +116,16 @@ class App extends React.Component {
       const res = await axios.post("http://localhost:3001/script/run", {
         script: hexScript,
         input: "",
+        blockHeight: this.state.blockHeight,
       });
       console.log(res);
       if (res.data.error) {
         this.setState({ output: "Error:" + res.data.message });
       } else {
         this.setState({
-          executingStep: 0,
-          stack: !res.data.result.length
-            ? "<stack was empty>"
-            : res.data.result,
-          output: "Result:" + res.data.result,
+          result: res.data.result,
         });
+        this.onStep();
       }
     } catch (error) {
       console.error(error);
@@ -124,9 +152,45 @@ class App extends React.Component {
             value={this.state.script.join("\n")}
             disabled={this.state.executingStep >= 0}
           />
+        </div>
+        <div>
+          <h2>Input stack</h2>
+          <textarea
+            rows="10"
+            onChange={this.inputStackUpdate}
+            value={this.state.inputStack}
+          />
+
+          <fieldset>
+            <legend>Script context</legend>
+            <label>Block height</label>
+            <input
+              type="number"
+              value={this.state.blockHeight}
+              onChange={this.blockHeightChange}
+            />
+          </fieldset>
+        </div>
+        <div>
+          <button onClick={this.onRun} disabled={executingStep >= 0}>
+            Start
+          </button>
+          <button
+            onClick={this.onStep}
+            disabled={
+              executingStep < 0 || this.state.result.length <= executingStep
+            }
+          >
+            Step
+          </button>
+          <button onClick={this.onStop} disabled={executingStep < 0}>
+            Stop
+          </button>
+          <h3>Script</h3>
           {this.state.script.map(function (line, index) {
             return (
               <pre
+                key={index}
                 style={{
                   backgroundColor: executingStep === index ? "red" : "white",
                 }}
@@ -135,23 +199,12 @@ class App extends React.Component {
               </pre>
             );
           })}
-        </div>
-        <div>
-          <h2>Input stack</h2>
+          <h3>Stack</h3>
           <textarea
             rows="20"
-            onChange={this.inputStackUpdate}
-            value={this.state.inputStack}
+            value={this.state.stack ? "<null>" : this.state.stack.join("\n")}
+            readOnly
           />
-        </div>
-        <div>
-          <button onClick={this.onRun}>Start</button>
-          <button disabled={executingStep < 0}>Step</button>
-          <button onClick={this.onStop} disabled={executingStep < 0}>
-            Stop
-          </button>
-          <h3>Stack</h3>
-          <textarea rows="20" value={this.state.stack} readOnly />
         </div>
         <div>
           <h3>Output</h3>
