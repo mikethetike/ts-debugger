@@ -15,10 +15,13 @@ function bufferToHex(buffer) {
     .join("");
 }
 function convertOpToHex(op) {
-  let args = op.match(/\(\d+\)/gi);
+  let args = op.match(/\(.+\)/gi);
   console.log(args);
-  if (op.match(/CheckHeightVerify/)) {
+  if (op.match(/CheckHeightVerify/gi)) {
     return "66" + toLEBytes(args[0].replace("(", "").replace(")", ""));
+  }
+  if (op.match(/PushPubKey/gi)) {
+    return "7e" + args[0].replace("(", "").replace(")", "");
   }
   return "73";
 }
@@ -33,8 +36,14 @@ function parseToHex(lines) {
 class App extends React.Component {
   constructor(props) {
     super(props);
+
+    // Read script from query
+    console.log(window.location);
+    const script = new URLSearchParams(window.location.search)
+      .get("script")
+      ?.split(",") || ["CheckHeightVerify(10)", "CheckHeightVerify(11)"];
     this.state = {
-      script: ["CheckHeightVerify(10)", "CheckHeightVerify(11)"],
+      script: script,
       inputStack: "",
       stack: [],
       output: "Out here",
@@ -99,7 +108,11 @@ class App extends React.Component {
           : `Succeeded`),
     });
     if (newStack) {
-      this.setState({ stack: newStack });
+      let text = [];
+      newStack.items.forEach(function (item) {
+        text.push(JSON.stringify(item));
+      });
+      this.setState({ stack: text });
     }
   }
 
@@ -202,16 +215,31 @@ class App extends React.Component {
           <h3>Stack</h3>
           <textarea
             rows="20"
-            value={this.state.stack ? "<null>" : this.state.stack.join("\n")}
+            value={this.state.stack ? this.state.stack.join("\n") : "<null>"}
             readOnly
           />
         </div>
         <div>
           <h3>Output</h3>
-          <p>{this.state.hexScript}</p>
+          <p>Raw hex script: {this.state.hexScript}</p>
           <pre>{this.state.output}</pre>
         </div>
         <div>
+          <div>
+            <h3>Templates:</h3>
+            <ul>
+              <li>
+                <a href="/?script=CheckHeightVerify(10),CheckHeightVerify(11)">
+                  Check height
+                </a>
+              </li>
+              <li>
+                <a href="/?script=PushPubkey(9AFDCE7BECF4BA47A15EFEB8720A4CB31F2037E53490EDE1683951278EFD1654)">
+                  One sided (Pay to pub key)
+                </a>
+              </li>
+            </ul>
+          </div>
           <h2>OP codes</h2>
           <ul>
             <li>
