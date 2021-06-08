@@ -17,18 +17,77 @@ function bufferToHex(buffer) {
 function convertOpToHex(op) {
   let args = op.match(/\(.+\)/gi);
   console.log(args);
+  if (op.match(/IfThen/gi)) {
+    return "61";
+  }
+  if (op.match(/Else/gi)) {
+    return "62";
+  }
+  if (op.match(/EndIf/gi)) {
+    return "63";
+  }
+
+  if (op.match(/OrVerify/gi)) {
+    return (
+      "64" +
+      parseInt(args[0].replace("(", "").replace(")", ""))
+        .toString(16)
+        .padStart(2, "0")
+    );
+  }
   if (op.match(/CheckHeightVerify/gi)) {
     return "66" + toLEBytes(args[0].replace("(", "").replace(")", ""));
+  }
+  if (op.match(/CheckHeight/gi)) {
+    return "67" + toLEBytes(args[0].replace("(", "").replace(")", ""));
   }
   if (op.match(/PushPubKey/gi)) {
     return "7e" + args[0].replace("(", "").replace(")", "");
   }
-  return "73";
+  if (op.match(/PushHash/gi)) {
+    return "7a" + args[0].replace("(", "").replace(")", "");
+  }
+  if (op.match(/Dup/gi)) {
+    return "71";
+  }
+  if (op.match(/EqualVerify/gi)) {
+    return "81";
+  }
+  if (op.match(/GeZero/gi)) {
+    return "82";
+  }
+  if (op.match(/GtZero/gi)) {
+    return "83";
+  }
+
+  if (op.match(/HashBlake256/gi)) {
+    return "b0";
+  }
+
+  return "I don'T knOw MaN(" + op + ")";
 }
 function parseToHex(lines) {
   let result = "";
   lines.forEach(function (item) {
-    result += convertOpToHex(item);
+    // Allow comments with #
+    if (!item.match(/^#/)) {
+      result += convertOpToHex(item);
+    }
+  });
+  return result;
+}
+
+function convertInputToHex(item) {
+  let args = item.match(/\(.+\)/gi);
+  if (item.match(/Pubkey/gi)) {
+    return "04" + args[0].replace("(", "").replace(")", "");
+  }
+  return "Idk man";
+}
+function parseInputToHex(lines) {
+  let result = "";
+  lines.forEach(function (item) {
+    result += convertInputToHex(item);
   });
   return result;
 }
@@ -39,15 +98,20 @@ class App extends React.Component {
 
     // Read script from query
     console.log(window.location);
-    const script = new URLSearchParams(window.location.search)
-      .get("script")
-      ?.split(",") || ["CheckHeightVerify(10)", "CheckHeightVerify(11)"];
+    const search = new URLSearchParams(window.location.search);
+
+    const script = search.get("script")?.split(",") || [
+      "CheckHeightVerify(10)",
+      "CheckHeightVerify(11)",
+    ];
+    const inputStack = search.get("input")?.split(",") || [];
     this.state = {
       script: script,
-      inputStack: "",
+      inputStack: inputStack,
       stack: [],
       output: "Out here",
       hexScript: "",
+      inputHex: "",
       executingStep: -1,
       result: [],
       blockHeight: "20",
@@ -75,7 +139,7 @@ class App extends React.Component {
 
   inputStackUpdate(event) {
     this.setState({
-      inputStack: event.target.value,
+      inputStack: event.target.value.split(/\n/),
     });
   }
 
@@ -91,13 +155,21 @@ class App extends React.Component {
     const newStep = this.state.executingStep + 1;
     console.log("stepping to: ", newStep);
     if (newStep >= this.state.result.length) {
+      if (this.state.stack.length !== 1) {
+        this.setState({
+          output:
+            "WARN: Script ended without leaving exactly one pub key on the stack",
+        });
+      } else {
+        this.setState({ output: "Script finished" });
+      }
       this.onStop();
       return;
     }
     console.log(this.state.result);
     const result = this.state.result[newStep];
     const newStack =
-      result?.step_result.ExecutedSuccessfully.stack_after_executing;
+      result?.step_result.ExecutedSuccessfully?.stack_after_executing;
     console.log("new stack", newStack);
     this.setState({
       executingStep: newStep,
@@ -105,6 +177,8 @@ class App extends React.Component {
         `${result.op_code}: \n` +
         (result.step_result.Failed
           ? `Error: ${this.state.result[newStep].step_result.Failed?.error}\n`
+          : result.step_result === "Skipped"
+          ? "Skipped"
           : `Succeeded`),
     });
     if (newStack) {
@@ -124,11 +198,12 @@ class App extends React.Component {
     // this.setState({ stack: this.state.inputStack });
     try {
       const hexScript = parseToHex(this.state.script);
+      const inputHex = parseInputToHex(this.state.inputStack);
 
-      this.setState({ hexScript: hexScript });
+      this.setState({ hexScript: hexScript, inputHex: inputHex });
       const res = await axios.post("http://localhost:3001/script/run", {
         script: hexScript,
-        input: "",
+        input: inputHex,
         blockHeight: this.state.blockHeight,
       });
       console.log(res);
@@ -155,6 +230,7 @@ class App extends React.Component {
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
           gridGap: 20,
+          textAlign: "left",
         }}
       >
         <div>
@@ -171,7 +247,7 @@ class App extends React.Component {
           <textarea
             rows="10"
             onChange={this.inputStackUpdate}
-            value={this.state.inputStack}
+            value={this.state.inputStack.join("\n")}
           />
 
           <fieldset>
@@ -222,6 +298,7 @@ class App extends React.Component {
         <div>
           <h3>Output</h3>
           <p>Raw hex script: {this.state.hexScript}</p>
+          <p>Raw input hex script: {this.state.inputHex}</p>
           <pre>{this.state.output}</pre>
         </div>
         <div>
@@ -238,18 +315,18 @@ class App extends React.Component {
                   One sided (Pay to pub key)
                 </a>
               </li>
+              <li>
+                <a href="/?script=Dup,HashBlake256,PushHash(9AFDCE7BECF4BA47A15EFEB8720A4CB3),EqualVerify&input=PubKey(9AFDCE7BECF4BA47A15EFEB8720A4CB31F2037E53490EDE1683951278EFD1654)">
+                  One sided (Pay to pub key hash)
+                </a>
+              </li>
+              <li>
+                <a href="/?script=Dup,PushPubkey(9AFDCE7BECF4BA47A15EFEB8720A4CB31F2037E53490EDE1683951278EFD1654),CheckHeight(10),GeZero,IFTHEN,PushPubkey(2c43d965e27b5425967b64ec039fd22c19b298ca6af9f6a071f1479ac4e1da57),OrVerify(2),ELSE,EqualVerify,ENDIF&input=PubKey(9AFDCE7BECF4BA47A15EFEB8720A4CB31F2037E53490EDE1683951278EFD1654)">
+                  Timelocked
+                </a>
+              </li>
             </ul>
           </div>
-          <h2>OP codes</h2>
-          <ul>
-            <li>
-              CheckHeightVerify(height)
-              <p>
-                Compare the current block height to height. Fails with
-                VERIFY_FAILED if the block height &lt; height.
-              </p>
-            </li>
-          </ul>
         </div>
       </div>
     );
