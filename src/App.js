@@ -95,6 +95,9 @@ function parseInputToHex(lines) {
 class App extends React.Component {
   constructor(props) {
     super(props);
+    import('tari_crypto').then(wasm => {
+      console.log(( wasm.TariScript.new()).hello())
+    })
 
     // Read script from query
     console.log(window.location);
